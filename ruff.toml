@@ -1,0 +1,28 @@
+[lint]
+extend-select = [
+    "B",
+    "C4",
+    "DJ",
+    "E",
+    "F",
+    "I",
+    "PIE",
+    "PGH",
+    "SIM",
+    "W",
+    "UP",
+    "RUF100",
+]
+
+extend-ignore = [
+    "E501",
+]
+fixable = ["C4", "E", "F", "I", "UP"]
+
+[lint.isort]
+known-first-party = ["stash"]
+lines-between-types = 1
+lines-after-imports = 2
+
+[format]
+docstring-code-format = true
