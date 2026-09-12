@@ -74,7 +74,11 @@ class Command(stash.StashCommandMixin, BaseCommand):
         self.stdout.write(str(tenant))
 ```
 
-These openers compose. `stash_scope()` with no name stacks on the default scope (`StashMiddleware` / `StashCommandMixin`), so a package can wrap `get_response` without wiping the request. A named scope can be open at the same time — see [Named scopes](#named-scopes).
+In a package, set `stash_scopes = ("wagtail",)` so that [named scope](#named-scopes) is open for the whole run. The mixin still opens the default too.
+
+These openers compose. A package `stash_scope()` around `get_response` is safe even if the project also uses `StashMiddleware` — keep `StashMiddleware` first so it opens the request, then later middleware stacks on it.
+
+Keys in the default scope are shared with the project. If a value is yours alone, give it a [named scope](#named-scopes) so nothing else can read, overwrite, or `clear` it.
 
 ## The problem it solves
 
@@ -110,7 +114,7 @@ Reach for stash when a value is expensive, needed in more than one place during 
 - **A check that fans out across a page.** A changelist renders 50 rows and calls `can_edit(obj)` for each. If `can_edit` starts with something request-wide — "is this user a reviewer this month" — that shouldn't be recomputed 50 times.
 - **You're about to write `request._cached_thing = ...`.** This pattern already exists in most Django codebases: stash something on `request` in middleware, read it back everywhere else. It works, but it only works where `request` is reachable, and it leaks the caching detail into every call site. `stash.get_or_set` is the same idea, usable from anywhere, without a `request` reference.
 - **A value that must be refreshed mid-request after a write.** Read settings early; a view updates them; later code in the *same* request must see the new value. One `stash.clear("site_settings")` call after the write handles it — see [`clear`](#get-set-clear) below.
-- **Batch scripts, one memo per unit of work.** Mix `StashCommandMixin` onto a management command to scope the whole run. Nested `stash_scope()` in a loop keeps command-level values and drops per-item memos when each block ends. A named `stash_scope("item")` can run alongside instead.
+- **Batch scripts, one memo per unit of work.** Mix `StashCommandMixin` onto a management command to scope the whole run, and wrap each row in `stash_scope()` so per-item memos die with the block. See [Nested scopes](#nested-scopes).
 
 ## Where this doesn't fit
 
@@ -172,10 +176,10 @@ stash.get("user_permissions")            # -> perms, or None
 stash.get("missing", default=[])         # -> []
 
 stash.clear("user_permissions")          # forget one value
-stash.clear()                            # empty the current frame
+stash.clear()                            # forget everything stored here
 ```
 
-`clear("user_permissions")` is what you call after writing to the underlying data, so later reads in the same request see the new state. It removes that key from every nested frame of the scope. `clear()` with no key empties only the current frame:
+`clear` is what you call after writing to the underlying data, so later reads in the same request see the new state:
 
 ```python
 def update_site_settings(**changes):
@@ -183,30 +187,54 @@ def update_site_settings(**changes):
     stash.clear("site_settings")
 ```
 
+### Nested scopes
+
+`stash_scope()` with no name uses the same default scope as `StashMiddleware` and `StashCommandMixin`. Nesting one inside the other does not wipe the outer values:
+
+```python
+class Command(stash.StashCommandMixin, BaseCommand):
+    def handle(self, *args, **options):
+        tenant = stash.get_or_set("tenant", load_tenant)
+        for row in rows:
+            with stash.stash_scope():
+                # tenant is still visible here
+                process(row)   # per-item memos live only in this block
+        # tenant is still here; per-item memos are gone
+```
+
+Writes in the inner `with` stay there. Reads look in the inner block first, then the outer one. `clear("tenant")` forgets that key in both; `clear()` with no key only forgets what the inner block stored.
+
 ### Named scopes
 
-The default scope is what `StashMiddleware`, `StashCommandMixin`, and `stash_scope()` open. Nested `stash_scope()` calls with the same name stack: inner writes go to a new frame, `get` looks inward then outward, and exiting the inner block restores the outer frame.
+A name is a separate namespace. `stash.get("page")` never sees `stash.get("page", scope="wagtail")`, and `clear("page")` in one does not touch the other.
 
-A **named** scope is a separate namespace that can be open at the same time — the right shape for a package that should not share keys with the app or another package:
+**In a reusable package, use a unique name for values that are yours.** You cannot know whether the project — or another package — already uses `"page"` or `"tenant"`. Pick the package name, open that scope from middleware you control, and pass `scope=` at every call site, including `@stash.memoize(scope="wagtail")`:
 
 ```python
 import stash
 
-class TenantMiddleware:
+class PageMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        with stash.stash_scope("tenants"):
-            stash.set("tenant", Tenant.objects.get(domain=request.get_host()), scope="tenants")
+        with stash.stash_scope("wagtail"):
+            stash.set("page", resolve_page(request), scope="wagtail")
             return self.get_response(request)
 
 
-def get_current_tenant():
-    return stash.get("tenant", scope="tenants")
+def get_current_page():
+    return stash.get("page", scope="wagtail")
 ```
 
-`stash.get("tenant")` still reads the default scope. Pick a stable name (the package name) and pass `scope=` at every call site that belongs to it. `@stash.memoize(scope="tenants")` does the same for the decorator.
+Management commands need the same name on the mixin, or `get_or_set(..., scope="wagtail")` will not store:
+
+```python
+class Command(stash.StashCommandMixin, BaseCommand):
+    stash_scopes = ("wagtail",)
+```
+
+**Leave the name off when the rest of the project is supposed to read the value** — the current tenant, the current site. That is the [Install](#install) example: `stash.set("tenant", ...)` with no `scope=`, so `stash.get("tenant")` works from models, template tags, and signals. Document those keys.
 
 ### Outside a request
 
@@ -220,13 +248,11 @@ stash.get("k")                  # -> None
 
 That is deliberate: a long-lived worker never accumulates stale values by accident.
 
-For a management command, mix in `StashCommandMixin` so each run gets a scope — the same idea as `StashMiddleware` for HTTP. See [Install](#install).
-
-If you want a fresh memo per item (or the same behaviour in a Celery task or shell), open a nested scope — command-level values remain, item-level ones do not:
+For a management command, mix in `StashCommandMixin` so each run gets a scope — the same idea as `StashMiddleware` for HTTP. See [Install](#install). Per-item memos go in a nested `stash_scope()` as in [Nested scopes](#nested-scopes). In a Celery task or shell, open the scope yourself:
 
 ```python
 with stash.stash_scope():
-    process_item()   # item memos live in this frame only
+    process_item()
 ```
 
 ## Behaviour in one table

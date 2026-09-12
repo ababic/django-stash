@@ -21,7 +21,8 @@ class StashMiddleware:
     your own), so installers don't have to add this class. Put
     ``StashMiddleware`` first if both are in use: it opens the default scope,
     and a later ``stash_scope()`` stacks on it (or ``stash_scope("name")``
-    runs alongside it).
+    runs alongside it). For values the project should not see, use a unique
+    name (the package name) and pass ``scope=`` at every call site.
 
     Outside a scope (management commands, Celery tasks, etc.) stash reads miss
     and writes no-op, so values cannot leak across units of work on a reused

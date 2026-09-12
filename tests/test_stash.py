@@ -224,6 +224,50 @@ class StashCommandMixinTests(SimpleTestCase):
         self.assertEqual(out.getvalue().strip(), "ok")
         self.assertFalse(stash.enabled())
 
+    def test_stash_scopes_opens_named_scope_for_the_run(self) -> None:
+        test = self
+
+        class PkgCommand(stash.StashCommandMixin, BaseCommand):
+            stash_scopes = ("pkg",)
+
+            def handle(self, *args, **options):
+                calls = {"n": 0}
+
+                def loader():
+                    calls["n"] += 1
+                    return "v"
+
+                stash.set("tenant", "acme")
+                stash.get_or_set("k", loader, scope="pkg")
+                stash.get_or_set("k", loader, scope="pkg")
+                test.assertEqual(calls["n"], 1)
+                test.assertEqual(stash.get("tenant"), "acme")
+                test.assertEqual(stash.get("k", scope="pkg"), "v")
+                test.assertIsNone(stash.get("k"))
+                self.stdout.write("ok")
+
+        out = StringIO()
+        call_command(PkgCommand(), stdout=out)
+        self.assertEqual(out.getvalue().strip(), "ok")
+        self.assertFalse(stash.enabled())
+        self.assertFalse(stash.enabled(scope="pkg"))
+
+    def test_stash_scopes_accepts_a_single_name(self) -> None:
+        test = self
+
+        class PkgCommand(stash.StashCommandMixin, BaseCommand):
+            stash_scopes = "pkg"
+
+            def handle(self, *args, **options):
+                stash.set("k", "v", scope="pkg")
+                test.assertEqual(stash.get("k", scope="pkg"), "v")
+                self.stdout.write("ok")
+
+        out = StringIO()
+        call_command(PkgCommand(), stdout=out)
+        self.assertEqual(out.getvalue().strip(), "ok")
+        self.assertFalse(stash.enabled(scope="pkg"))
+
 
 class StashNamedScopeTests(SimpleTestCase):
     def setUp(self) -> None:
