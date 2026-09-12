@@ -19,10 +19,10 @@ class StashCommandMixin:
     scope, closed when the command finishes (including on error). Useful in
     an app you own and in a reusable package — installers never see it.
 
-    Don't wrap the same run in ``stash_scope()`` as well. Nested scopes
-    replace rather than stack, and exiting the inner block would close the
-    command's scope. For a fresh memo per item, skip the mixin and use
-    ``stash_scope()`` in the loop instead.
+    Nested ``stash_scope()`` calls stack on this scope, so a per-item
+    ``with stash.stash_scope():`` keeps command-level values and drops
+    item-level ones when the block ends. A named ``stash_scope("item")``
+    can run alongside the command scope instead.
     """
 
     def execute(self, *args: Any, **options: Any) -> Any:

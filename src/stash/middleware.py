@@ -18,8 +18,10 @@ class StashMiddleware:
     For a website or web app you own, this is the easy way to get started. In
     a reusable package, prefer wrapping ``get_response`` in
     ``stash.stash_scope()`` from middleware you already require (or one of
-    your own), so installers don't have to add this class. Don't combine the
-    two — a new scope replaces the previous one.
+    your own), so installers don't have to add this class. Put
+    ``StashMiddleware`` first if both are in use: it opens the default scope,
+    and a later ``stash_scope()`` stacks on it (or ``stash_scope("name")``
+    runs alongside it).
 
     Outside a scope (management commands, Celery tasks, etc.) stash reads miss
     and writes no-op, so values cannot leak across units of work on a reused

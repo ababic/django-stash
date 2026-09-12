@@ -201,3 +201,118 @@ class StashCommandMixinTests(SimpleTestCase):
             call_command(BoomCommand(), stdout=StringIO())
         self.assertFalse(stash.enabled())
         self.assertIsNone(stash.get("k"))
+
+    def test_nested_scope_keeps_command_values(self) -> None:
+        test = self
+
+        class NestedCommand(stash.StashCommandMixin, BaseCommand):
+            def handle(self, *args, **options):
+                stash.set("tenant", "acme")
+                items = []
+                for i in (1, 2):
+                    with stash.stash_scope():
+                        test.assertEqual(stash.get("tenant"), "acme")
+                        stash.set("item", i)
+                        items.append(stash.get("item"))
+                test.assertEqual(items, [1, 2])
+                test.assertEqual(stash.get("tenant"), "acme")
+                test.assertIsNone(stash.get("item"))
+                self.stdout.write("ok")
+
+        out = StringIO()
+        call_command(NestedCommand(), stdout=out)
+        self.assertEqual(out.getvalue().strip(), "ok")
+        self.assertFalse(stash.enabled())
+
+
+class StashNamedScopeTests(SimpleTestCase):
+    def setUp(self) -> None:
+        stash.disable()
+
+    def tearDown(self) -> None:
+        stash.disable()
+
+    def test_named_and_default_scopes_are_independent(self) -> None:
+        with stash.stash_scope():
+            stash.set("k", "default")
+            with stash.stash_scope("other"):
+                stash.set("k", "named", scope="other")
+                self.assertEqual(stash.get("k"), "default")
+                self.assertEqual(stash.get("k", scope="other"), "named")
+                self.assertTrue(stash.enabled())
+                self.assertTrue(stash.enabled(scope="other"))
+            self.assertIsNone(stash.get("k", scope="other"))
+            self.assertFalse(stash.enabled(scope="other"))
+            self.assertEqual(stash.get("k"), "default")
+
+    def test_nested_same_name_stacks(self) -> None:
+        with stash.stash_scope():
+            stash.set("k", "outer")
+            with stash.stash_scope():
+                self.assertEqual(stash.get("k"), "outer")
+                stash.set("k", "inner")
+                self.assertEqual(stash.get("k"), "inner")
+                stash.set("only_inner", 1)
+            self.assertEqual(stash.get("k"), "outer")
+            self.assertIsNone(stash.get("only_inner"))
+
+    def test_get_or_set_stores_on_inner_frame(self) -> None:
+        calls = {"n": 0}
+
+        def loader():
+            calls["n"] += 1
+            return ["v"]
+
+        with stash.stash_scope():
+            stash.set("shared", "outer")
+            with stash.stash_scope():
+                self.assertEqual(stash.get_or_set("shared", loader), "outer")
+                self.assertEqual(stash.get_or_set("inner", loader), ["v"])
+                self.assertEqual(calls["n"], 1)
+            self.assertEqual(stash.get("shared"), "outer")
+            self.assertIsNone(stash.get("inner"))
+
+    def test_clear_key_punches_through_outer_frames(self) -> None:
+        with stash.stash_scope():
+            stash.set("k", "outer")
+            with stash.stash_scope():
+                stash.set("k", "inner")
+                stash.clear("k")
+                self.assertIsNone(stash.get("k"))
+            self.assertIsNone(stash.get("k"))
+
+    def test_clear_without_key_empties_inner_frame_only(self) -> None:
+        with stash.stash_scope():
+            stash.set("outer", 1)
+            with stash.stash_scope():
+                stash.set("inner", 2)
+                stash.clear()
+                self.assertIsNone(stash.get("inner"))
+                self.assertEqual(stash.get("outer"), 1)
+
+    def test_named_get_or_set_and_memoize(self) -> None:
+        calls = {"n": 0}
+
+        @stash.memoize(scope="pkg")
+        def compute() -> str:
+            calls["n"] += 1
+            return "v"
+
+        with stash.stash_scope():
+            with stash.stash_scope("pkg"):
+                self.assertEqual(compute(), "v")
+                self.assertEqual(compute(), "v")
+                self.assertEqual(calls["n"], 1)
+                self.assertEqual(stash.get_or_set("k", lambda: "x", scope="pkg"), "x")
+            self.assertIsNone(stash.get("k", scope="pkg"))
+            self.assertEqual(calls["n"], 1)
+            self.assertEqual(compute(), "v")
+            self.assertEqual(calls["n"], 2)
+
+    def test_enable_drops_named_scopes(self) -> None:
+        with stash.stash_scope("pkg"):
+            stash.set("k", 1, scope="pkg")
+            stash.enable()
+            self.assertIsNone(stash.get("k", scope="pkg"))
+            self.assertTrue(stash.enabled())
+            self.assertFalse(stash.enabled(scope="pkg"))
