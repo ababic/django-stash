@@ -199,7 +199,9 @@ def stash_scope(name: str | None = None) -> Iterator[None]:
     Use this in your own middleware instead of ``StashMiddleware`` — the
     better option in a reusable package, so installers don't have to add
     third-party middleware — or around a unit of work in a Celery task,
-    test, or loop. For a management command, prefer ``StashCommandMixin``.
+    test, or loop. Do not wrap a Django view: ``TemplateResponse`` is
+    rendered after the view returns, so a mixin or decorator would close
+    too early. For a management command, prefer ``StashCommandMixin``.
     """
     scopes = _scope_map()
     stack = scopes.setdefault(name, [])

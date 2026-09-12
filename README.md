@@ -61,6 +61,10 @@ class TenantMiddleware:
 
 The same `with` works in async middleware.
 
+Do not open the HTTP scope from a view. Django renders `TemplateResponse` *after* the view returns — `TemplateView`, `ListView`, and `DetailView` all do this — so a mixin on `dispatch()`, a decorator on `as_view()`, or `with stash_scope():` around the view body would close before template tags run. Middleware is the only opener that covers the full request/response cycle: `get_response` includes the view *and* that deferred render. `StashMiddleware` does it for an app you own; in a package, wrap `get_response` as above.
+
+`with stash_scope():` *inside* a view is still fine for work that finishes before you return — a loop, a loader. That is a nested block, not the request opener.
+
 Management commands sit outside the request cycle, so `StashMiddleware` never runs. Mix `StashCommandMixin` onto the command so each invocation gets a stash scope — in an app you own, or in a package (installers never see it):
 
 ```python
@@ -118,6 +122,7 @@ Reach for stash when a value is expensive, needed in more than one place during 
 
 ## Where this doesn't fit
 
+- **Opening the HTTP scope from a view mixin or decorator.** Django renders `TemplateResponse` after the view returns, so template tags would miss. Use middleware — it is the only way to cover the full request/response cycle. See [Install](#install).
 - **Secrets, tokens, passwords, or anything you would not put in Django's cache.** Stash is ambient: any code in the same scope can `stash.get` the value by name. A named scope only keeps your keys apart from other packages; it does not hide anything. Leave credentials out.
 - **You want the answer shared across requests, workers, or deploys.** That's Django's cache framework (`django.core.cache`, backed by Redis/Memcached/the DB). Stash never outlives one scope — put it in front of that cache as L1 if you want both.
 - **The value needs to reach other processes.** Stash is per-process, per-scope. One worker's stash tells another worker nothing.
