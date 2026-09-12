@@ -57,6 +57,26 @@ def get_site_settings():
     return stash.get_or_set("site_settings", lambda: SiteSettings.objects.get())
 ```
 
+## Where this fits
+
+Reach for stash when a value is expensive, needed in more than one place during a single request, and awkward to get to from where you are:
+
+- **A request-derived value needed somewhere without `request`.** Middleware resolves the current tenant from the hostname; a model manager, a permission check, and a signal handler all need it too, but none of them have `request` in scope.
+  ```python
+  def get_current_tenant():
+      return stash.get_or_set("tenant", resolve_tenant_from_request)
+  ```
+- **A check that fans out across a page.** A changelist renders 50 rows and calls `can_edit(obj)` for each. If `can_edit` starts with something request-wide — "is this user a reviewer this month" — that shouldn't be recomputed 50 times.
+- **You're about to write `request._cached_thing = ...`.** This pattern already exists in most Django codebases: stash something on `request` in middleware, read it back everywhere else. It works, but it only works where `request` is reachable, and it leaks the caching detail into every call site. `stash.get_or_set` is the same idea, usable from anywhere, without a `request` reference.
+- **A value that must be refreshed mid-request after a write.** Read settings early; a view updates them; later code in the *same* request must see the new value. One `stash.clear("site_settings")` call after the write handles it — see [`clear`](#get-set-clear) below.
+- **Batch scripts, one memo per unit of work.** Wrap each row/item in `stash_scope()` so lookups inside it are cheap, and nothing survives to the next item.
+
+## Where this doesn't fit
+
+- **You want the answer shared across requests, workers, or deploys.** That's Django's cache framework (`django.core.cache`, backed by Redis/Memcached/the DB). Stash never outlives one scope — put it in front of that cache as L1 if you want both.
+- **The value needs to reach other processes.** Stash is per-process, per-scope. One worker's stash tells another worker nothing.
+- **A pure function with no invalidation need, no request in the picture.** `functools.lru_cache` is simpler and doesn't need a scope at all.
+
 ## Usage
 
 ### `get_or_set`
