@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- README: HTTP scopes belong in middleware, not a view mixin or decorator — Django renders `TemplateResponse` after the view returns.
+
 ## 0.4.0
 
 - Named scopes (`stash_scope("tenants")` + `scope=` on get/set/get_or_set/clear/memoize) can be open alongside the default scope. Nested `stash_scope()` calls with the same name stack instead of replacing.

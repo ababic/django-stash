@@ -12,6 +12,11 @@ class StashMiddleware:
     """
     Open a stash scope for the duration of one HTTP request.
 
+    Middleware is the HTTP opener because Django renders
+    ``TemplateResponse`` after the view returns. A mixin on ``dispatch()``
+    or a decorator on ``as_view()`` would close before template tags run.
+    Wrapping ``get_response`` covers the view *and* that deferred render.
+
     Works as sync or async middleware, so it does not force Django to adapt the
     middleware chain when running under ASGI.
 
