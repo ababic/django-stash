@@ -14,36 +14,40 @@ T = TypeVar("T")
 
 _local = Local()
 _MISSING = object()
+_DEFAULT_SCOPE: str | None = None
 
 
-def enabled() -> bool:
+def _scope_map() -> dict[str | None, list[dict[str, Any]]]:
+    scopes = getattr(_local, "scopes", None)
+    if scopes is None:
+        scopes = {}
+        _local.scopes = scopes
+    return scopes
+
+
+def _frames(scope: str | None) -> list[dict[str, Any]] | None:
+    return _scope_map().get(scope)
+
+
+def enabled(*, scope: str | None = None) -> bool:
     """Return whether a stash scope is active for this execution context."""
-    return bool(getattr(_local, "enabled", False))
+    return bool(_frames(scope))
 
 
 def enable() -> None:
     """
-    Open a stash scope for this execution context.
+    Open a fresh default stash scope for this execution context.
 
-    Prefer ``StashMiddleware``, ``StashCommandMixin``, or ``stash_scope()``
-    so lifetime is bounded.
+    Drops any previously open named or nested scopes. Prefer
+    ``StashMiddleware``, ``StashCommandMixin``, or ``stash_scope()`` so
+    lifetime is bounded.
     """
-    _local.enabled = True
-    _local.values = {}
+    _local.scopes = {_DEFAULT_SCOPE: [{}]}
 
 
 def disable() -> None:
-    """Close the stash scope and drop all stored values for this context."""
-    _local.values = {}
-    _local.enabled = False
-
-
-def _values() -> dict[str, Any]:
-    values = getattr(_local, "values", None)
-    if values is None:
-        values = {}
-        _local.values = values
-    return values
+    """Close every stash scope and drop all stored values for this context."""
+    _local.scopes = {}
 
 
 def _store(value: Any) -> Any:
@@ -54,57 +58,80 @@ def _retrieve(value: Any) -> Any:
     return copy.copy(value)
 
 
-def get(key: str, default: Any = None) -> Any:
+def _lookup(key: str, scope: str | None) -> Any:
+    stack = _frames(scope)
+    if not stack:
+        return _MISSING
+    for frame in reversed(stack):
+        value = frame.get(key, _MISSING)
+        if value is not _MISSING:
+            return value
+    return _MISSING
+
+
+def get(key: str, default: Any = None, *, scope: str | None = None) -> Any:
     """Return a stashed value, or ``default`` on miss / when no scope is active."""
-    if not enabled():
-        return default
-    value = _values().get(key, _MISSING)
+    value = _lookup(key, scope)
     if value is _MISSING:
         return default
     return _retrieve(value)
 
 
-def set(key: str, value: Any) -> None:
+def set(key: str, value: Any, *, scope: str | None = None) -> None:
     """
-    Store ``value`` under ``key`` when a scope is active.
+    Store ``value`` under ``key`` in the innermost frame of ``scope``.
 
-    No-op when no scope is active (avoids sticky process-level state).
+    No-op when that scope is not active (avoids sticky process-level state).
     """
-    if not enabled():
+    stack = _frames(scope)
+    if not stack:
         return
-    _values()[key] = _store(value)
+    stack[-1][key] = _store(value)
 
 
-def clear(key: str | None = None) -> None:
-    """Clear one key, or the entire stash when ``key`` is omitted."""
-    if not enabled():
+def clear(key: str | None = None, *, scope: str | None = None) -> None:
+    """
+    Clear one key, or the current frame when ``key`` is omitted.
+
+    ``clear("k")`` removes ``k`` from every nested frame of ``scope``, so a
+    later ``get_or_set`` reloads even if an outer frame had it. ``clear()``
+    empties only the innermost frame, leaving outer frames of the same name
+    intact.
+    """
+    stack = _frames(scope)
+    if not stack:
         return
     if key is None:
-        _local.values = {}
+        stack[-1].clear()
         return
-    _values().pop(key, None)
+    for frame in stack:
+        frame.pop(key, None)
 
 
-def get_or_set(key: str, loader: Callable[[], T]) -> T:
+def get_or_set(key: str, loader: Callable[[], T], *, scope: str | None = None) -> T:
     """
     Return a stashed value, or call ``loader``, stash the result, and return it.
 
-    When no scope is active, always calls ``loader()`` and does not store.
+    Looks innermost-first through nested frames of ``scope``. A miss stores
+    on the current (innermost) frame. When that scope is not active, always
+    calls ``loader()`` and does not store.
     """
-    if not enabled():
+    stack = _frames(scope)
+    if not stack:
         return loader()
 
-    values = _values()
-    value = values.get(key, _MISSING)
+    value = _lookup(key, scope)
     if value is not _MISSING:
         return _retrieve(value)
 
     loaded = loader()
-    values[key] = _store(loaded)
+    stack[-1][key] = _store(loaded)
     return _retrieve(loaded)
 
 
-def _memo_key(func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+def _memo_key(
+    func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> str:
     qualname = f"{func.__module__}.{func.__qualname__}"
     if not args and not kwargs:
         return qualname
@@ -119,6 +146,7 @@ def memoize(func: Callable[..., T]) -> Callable[..., T]: ...
 def memoize(
     *,
     key: str | None = None,
+    scope: str | None = None,
 ) -> Callable[[Callable[..., T]], Callable[..., T]]: ...
 
 
@@ -126,12 +154,14 @@ def memoize(
     func: Callable[..., T] | None = None,
     *,
     key: str | None = None,
+    scope: str | None = None,
 ) -> Callable[..., T] | Callable[[Callable[..., T]], Callable[..., T]]:
     """
     Memoize a function into the active stash scope.
 
     ``@memoize`` derives a key from the function and call arguments.
     ``@memoize(key="...")`` uses a fixed key (argument values ignored).
+    ``@memoize(scope="...")`` stores in a named scope.
     Outside a scope, the function always runs normally.
     """
 
@@ -139,7 +169,7 @@ def memoize(
         @wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> T:
             cache_key = key if key is not None else _memo_key(fn, args, kwargs)
-            return get_or_set(cache_key, lambda: fn(*args, **kwargs))
+            return get_or_set(cache_key, lambda: fn(*args, **kwargs), scope=scope)
 
         return wrapper
 
@@ -149,18 +179,33 @@ def memoize(
 
 
 @contextmanager
-def stash_scope() -> Iterator[None]:
+def stash_scope(name: str | None = None) -> Iterator[None]:
     """
     Open a stash scope for a block of work.
+
+    ``stash_scope()`` uses the default scope (the same one
+    ``StashMiddleware`` and ``StashCommandMixin`` open). Nested calls with
+    the same name stack: inner ``set`` / ``get_or_set`` write the current
+    frame, ``get`` looks inward then outward, and exiting the inner block
+    restores the outer frame.
+
+    ``stash_scope("wagtail")`` is a separate named scope that can be open at
+    the same time as the default. ``get`` / ``set`` / ``get_or_set`` /
+    ``clear`` take ``scope="wagtail"`` to read or write it.
 
     Use this in your own middleware instead of ``StashMiddleware`` — the
     better option in a reusable package, so installers don't have to add
     third-party middleware — or around a unit of work in a Celery task,
     test, or loop. For a management command, prefer ``StashCommandMixin``.
-    Nested calls replace the previous scope rather than stacking.
     """
-    enable()
+    scopes = _scope_map()
+    stack = scopes.setdefault(name, [])
+    stack.append({})
     try:
         yield
     finally:
-        disable()
+        current = _scope_map().get(name)
+        if current is stack and stack:
+            stack.pop()
+            if not stack:
+                _scope_map().pop(name, None)
