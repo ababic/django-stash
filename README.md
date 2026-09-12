@@ -77,6 +77,23 @@ Reach for stash when a value is expensive, needed in more than one place during 
 - **The value needs to reach other processes.** Stash is per-process, per-scope. One worker's stash tells another worker nothing.
 - **A pure function with no invalidation need, no request in the picture.** `functools.lru_cache` is simpler and doesn't need a scope at all.
 
+## Alternatives
+
+| | Scope | Needs `request`? | Cost per hit | Crosses requests / processes? | Invalidation |
+|---|---|---|---|---|---|
+| **stash** | One request, or a `stash_scope()` block | No | Dict lookup | Never | Automatic when the scope ends; `clear()` any time before that |
+| **[`django-request-cache`](https://github.com/anexia/django-request-cache)** | One request | Yes — exposes the *whole* request globally to get one | Attribute lookup | No | Automatic at request end only |
+| **`request._cached_x`** (manual) | One request | Yes, at every call site | Attribute lookup | No | Manual, ad hoc |
+| **Django's cache framework** | Until TTL, eviction, or delete | No | locmem: lock + dict. Redis/Memcached/DB: network round trip + (de)serialization, every call | Yes — that's the point | TTL, `cache.delete()`, or signals |
+| **`functools.lru_cache`** | Process lifetime | No | Dict lookup | Accidentally, forever — same answer until the process restarts | None, short of calling `cache_clear()` yourself |
+| **Bare thread-local / module global** | However long you remember to keep it valid | No | Dict/attribute lookup | Accidentally — sync workers reuse a thread across requests | Whatever you remember to write, wherever you remember to write it |
+
+The last row is the trap: a hand-rolled `threading.local()` or `asgiref.Local()` looks identical to stash until a worker process reuses its thread for a second request and the old value is still sitting there. Stash's storage is the same mechanism (`asgiref.local.Local`), but the lifetime is never left to memory — `StashMiddleware` opens and closes the scope on every single request, so there's no window where a stale value can survive into the next one.
+
+**[`django-request-cache`](https://github.com/anexia/django-request-cache)** takes the same idea a step further: instead of exposing one named value, it makes the *whole request object* reachable from anywhere first (via `django-userforeignkey`'s `get_current_request()`), then hangs a cache off it as an attribute. That's an extra dependency, and a much bigger object made globally available than most call sites need. Stash's storage never holds `request` — only the specific values you chose to stash, by name.
+
+**Django's cache framework** (`django.core.cache`) is still the right choice the moment a value needs to survive past one request — nothing here replaces it. The trade-off in the table above is the one to remember: reach for the cache framework when a value is shared across requests or processes, and put stash *in front of it* when the same value is read more than once inside a single request.
+
 ## Usage
 
 ### `get_or_set`
