@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- README: do not stash secrets (passwords, tokens, API keys) — same rule as Django's cache; a named scope is not a security boundary.
 - Named scopes (`stash_scope("tenants")` + `scope=` on get/set/get_or_set/clear/memoize) can be open alongside the default scope. Nested `stash_scope()` calls with the same name stack instead of replacing.
 - README: Nested vs Named scopes; packages use a unique name for private values, and the default scope when the host should read them.
 - `StashCommandMixin.stash_scopes` opens extra named scopes for a command run.
