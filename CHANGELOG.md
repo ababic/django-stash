@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- README: alternatives comparison table (`django-request-cache`, Django's cache framework, `functools.lru_cache`, bare thread-locals) and a genuinely request-derived hero example (hostname-based tenant resolution) in place of one that never touched `request`.
+
 ## 0.2.0
 
 - `StashMiddleware` is now sync- and async-capable, so it no longer forces Django to adapt the rest of an ASGI middleware chain.
