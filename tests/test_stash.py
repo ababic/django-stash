@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from asgiref.sync import iscoroutinefunction
+from django.http import HttpResponse
 from django.test import SimpleTestCase, override_settings
 
 import stash
+
+from stash.middleware import StashMiddleware
 
 
 class StashApiTests(SimpleTestCase):
@@ -90,6 +94,19 @@ class StashApiTests(SimpleTestCase):
         self.assertFalse(stash.enabled())
         self.assertIsNone(stash.get("k"))
 
+    async def test_scope_in_async_code(self) -> None:
+        calls = {"n": 0}
+
+        def loader():
+            calls["n"] += 1
+            return "v"
+
+        with stash.stash_scope():
+            self.assertEqual(stash.get_or_set("k", loader), "v")
+            self.assertEqual(stash.get_or_set("k", loader), "v")
+            self.assertEqual(calls["n"], 1)
+        self.assertFalse(stash.enabled())
+
 
 class StashMiddlewareTests(SimpleTestCase):
     def test_middleware_memoizes_within_request(self) -> None:
@@ -103,3 +120,25 @@ class StashMiddlewareTests(SimpleTestCase):
         response = self.client.get("/probe/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content.decode(), "calls=2;same=True")
+
+    async def test_async_view_under_asgi(self) -> None:
+        response = await self.async_client.get("/async-probe/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content.decode(), "calls=1;same=True")
+        self.assertFalse(stash.enabled())
+
+    async def test_sync_view_under_asgi(self) -> None:
+        response = await self.async_client.get("/probe/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content.decode(), "calls=1;same=True")
+        self.assertFalse(stash.enabled())
+
+    def test_middleware_adapts_to_sync_and_async_chains(self) -> None:
+        def sync_get_response(request):
+            return HttpResponse()
+
+        async def async_get_response(request):
+            return HttpResponse()
+
+        self.assertFalse(iscoroutinefunction(StashMiddleware(sync_get_response)))
+        self.assertTrue(iscoroutinefunction(StashMiddleware(async_get_response)))

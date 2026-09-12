@@ -139,7 +139,7 @@ with stash.stash_scope():
 
 - Values are stored and returned as **shallow copies**. Mutating what you get back does not change what is stored. Don't rely on identity.
 - Stash is an L1 in front of whatever you already do. If you also want cross-process sharing, keep using Django's cache as L2 inside your loader.
-- Works in sync and async views; storage is `asgiref.local.Local`.
+- Works under WSGI and ASGI, with sync or async views. The middleware is sync- and async-capable, so it does not force Django to adapt the rest of the chain. Storage is `asgiref.local.Local`.
 
 ## Development
 
