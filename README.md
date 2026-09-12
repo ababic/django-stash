@@ -74,6 +74,8 @@ class Command(stash.StashCommandMixin, BaseCommand):
         self.stdout.write(str(tenant))
 ```
 
+In a package, set `stash_scopes = ("wagtail",)` so that [named scope](#named-scopes) is open for the whole run. The mixin still opens the default too.
+
 These openers compose. A package `stash_scope()` around `get_response` is safe even if the project also uses `StashMiddleware` — keep `StashMiddleware` first so it opens the request, then later middleware stacks on it.
 
 Keys in the default scope are shared with the project. If a value is yours alone, give it a [named scope](#named-scopes) so nothing else can read, overwrite, or `clear` it.
@@ -223,6 +225,13 @@ class PageMiddleware:
 
 def get_current_page():
     return stash.get("page", scope="wagtail")
+```
+
+Management commands need the same name on the mixin, or `get_or_set(..., scope="wagtail")` will not store:
+
+```python
+class Command(stash.StashCommandMixin, BaseCommand):
+    stash_scopes = ("wagtail",)
 ```
 
 **Leave the name off when the rest of the project is supposed to read the value** — the current tenant, the current site. That is the [Install](#install) example: `stash.set("tenant", ...)` with no `scope=`, so `stash.get("tenant")` works from models, template tags, and signals. Document those keys.
