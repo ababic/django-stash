@@ -79,7 +79,7 @@ def get(key: str, default: Any = None, *, scope: str | None = None) -> Any:
 
 def set(key: str, value: Any, *, scope: str | None = None) -> None:
     """
-    Store ``value`` under ``key`` in the innermost frame of ``scope``.
+    Store ``value`` under ``key`` in the innermost block of ``scope``.
 
     No-op when that scope is not active (avoids sticky process-level state).
     """
@@ -91,12 +91,12 @@ def set(key: str, value: Any, *, scope: str | None = None) -> None:
 
 def clear(key: str | None = None, *, scope: str | None = None) -> None:
     """
-    Clear one key, or the current frame when ``key`` is omitted.
+    Clear one key, or the current innermost block when ``key`` is omitted.
 
-    ``clear("k")`` removes ``k`` from every nested frame of ``scope``, so a
-    later ``get_or_set`` reloads even if an outer frame had it. ``clear()``
-    empties only the innermost frame, leaving outer frames of the same name
-    intact.
+    ``clear("k")`` removes ``k`` from every nested block of ``scope``, so a
+    later ``get_or_set`` reloads even if an outer block had it. ``clear()``
+    empties only the innermost block, leaving outer values of the same
+    name intact.
     """
     stack = _frames(scope)
     if not stack:
@@ -112,8 +112,8 @@ def get_or_set(key: str, loader: Callable[[], T], *, scope: str | None = None) -
     """
     Return a stashed value, or call ``loader``, stash the result, and return it.
 
-    Looks innermost-first through nested frames of ``scope``. A miss stores
-    on the current (innermost) frame. When that scope is not active, always
+    Looks innermost-first through nested blocks of ``scope``. A miss stores
+    on the current (innermost) block. When that scope is not active, always
     calls ``loader()`` and does not store.
     """
     stack = _frames(scope)
@@ -185,9 +185,9 @@ def stash_scope(name: str | None = None) -> Iterator[None]:
 
     ``stash_scope()`` uses the default scope (the same one
     ``StashMiddleware`` and ``StashCommandMixin`` open). Nested calls with
-    the same name stack: inner ``set`` / ``get_or_set`` write the current
-    frame, ``get`` looks inward then outward, and exiting the inner block
-    restores the outer frame.
+    the same name stack: inner writes stay in the inner block, ``get``
+    looks there first then outward, and exiting the inner block restores
+    the outer values.
 
     ``stash_scope("wagtail")`` is a separate named scope that can be open at
     the same time as the default. ``get`` / ``set`` / ``get_or_set`` /
