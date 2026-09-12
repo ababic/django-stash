@@ -8,11 +8,22 @@ Remember a value for the rest of the current request, and read it back from anyw
 ```python
 import stash
 
+# middleware.py — the one place that actually has `request`
+class TenantMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        stash.set("tenant", Tenant.objects.get(domain=request.get_host()))
+        return self.get_response(request)
+
+
+# models.py, templatetags/, signals.py — no `request` in sight
 def get_current_tenant():
-    return stash.get_or_set("tenant", lambda: Tenant.objects.get(pk=...))
+    return stash.get("tenant")
 ```
 
-Call it ten times in one request: the loader runs once. Next request: it runs again.
+`TenantMiddleware` resolves the tenant from the hostname once, because that's the only place `request` is available. Every other call to `get_current_tenant()` during that request — from a model manager, a template tag, a signal handler — reads the same value back. Next request: middleware resolves it again.
 
 This is **not** a cache backend. Nothing is shared between requests, processes, or workers. Values live only while a request is being handled, and are thrown away when it finishes.
 
@@ -33,7 +44,7 @@ No `INSTALLED_APPS` entry needed.
 
 ## The problem it solves
 
-You have something that is expensive to compute, and needed in several unrelated places during one request — a template tag, a model method, a serializer, a signal handler:
+Not every case needs `request` at all. Sometimes you just have something expensive, needed in several unrelated places during one request — a template tag, a model method, a serializer, a signal handler:
 
 ```python
 # views.py
@@ -61,11 +72,7 @@ def get_site_settings():
 
 Reach for stash when a value is expensive, needed in more than one place during a single request, and awkward to get to from where you are:
 
-- **A request-derived value needed somewhere without `request`.** Middleware resolves the current tenant from the hostname; a model manager, a permission check, and a signal handler all need it too, but none of them have `request` in scope.
-  ```python
-  def get_current_tenant():
-      return stash.get_or_set("tenant", resolve_tenant_from_request)
-  ```
+- **A request-derived value needed somewhere without `request`.** This is the example at the top: something that can only be resolved from the hostname, a header, or a cookie — the current tenant, the authenticated API client, an A/B test bucket — computed once where `request` exists, then read back from wherever it doesn't.
 - **A check that fans out across a page.** A changelist renders 50 rows and calls `can_edit(obj)` for each. If `can_edit` starts with something request-wide — "is this user a reviewer this month" — that shouldn't be recomputed 50 times.
 - **You're about to write `request._cached_thing = ...`.** This pattern already exists in most Django codebases: stash something on `request` in middleware, read it back everywhere else. It works, but it only works where `request` is reachable, and it leaks the caching detail into every call site. `stash.get_or_set` is the same idea, usable from anywhere, without a `request` reference.
 - **A value that must be refreshed mid-request after a write.** Read settings early; a view updates them; later code in the *same* request must see the new value. One `stash.clear("site_settings")` call after the write handles it — see [`clear`](#get-set-clear) below.
