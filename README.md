@@ -23,7 +23,7 @@ def get_current_tenant():
     return stash.get("tenant")
 ```
 
-`TenantMiddleware` resolves the tenant from the hostname once, because that's the only place `request` is available. Every other call to `get_current_tenant()` during that request — from a model manager, a template tag, a signal handler — reads the same value back. Next request: middleware resolves it again.
+`TenantMiddleware` resolves the tenant from the hostname once, because that's the only place `request` is available. Every other call to `get_current_tenant()` during that request — from a model manager, a template tag, a signal handler — reads the same value back. Next request: middleware resolves it again. A scope has to be open for `stash.set` to stick — `StashMiddleware`, or `stash_scope()` in this same class. See [Install](#install).
 
 This is **not** a cache backend. Nothing is shared between requests, processes, or workers. Values live only while a request is being handled, and are thrown away when it finishes.
 
@@ -33,12 +33,31 @@ This is **not** a cache backend. Nothing is shared between requests, processes, 
 pip install django-stash
 ```
 
+Nothing is stored unless a scope is open. The usual way is `StashMiddleware`:
+
 ```python
 MIDDLEWARE = [
     "stash.middleware.StashMiddleware",
     # ...
 ]
 ```
+
+If you already have middleware that should own the lifetime — tenant resolution, site matching, and so on — wrap the rest of the request in `stash_scope()` instead. You don't need `StashMiddleware` as well:
+
+```python
+import stash
+
+class TenantMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        with stash.stash_scope():
+            stash.set("tenant", Tenant.objects.get(domain=request.get_host()))
+            return self.get_response(request)
+```
+
+The same `with` works in async middleware. Use one opener, not both: `stash_scope()` starts a fresh scope, it does not nest.
 
 No `INSTALLED_APPS` entry needed.
 
@@ -95,7 +114,7 @@ Reach for stash when a value is expensive, needed in more than one place during 
 | **`functools.lru_cache`** | Process lifetime | No | Dict lookup | Accidentally, forever — same answer until the process restarts | None, short of calling `cache_clear()` yourself |
 | **Bare thread-local / module global** | However long you remember to keep it valid | No | Dict/attribute lookup | Accidentally — sync workers reuse a thread across requests | Whatever you remember to write, wherever you remember to write it |
 
-The last row is the trap: a hand-rolled `threading.local()` or `asgiref.Local()` looks identical to stash until a worker process reuses its thread for a second request and the old value is still sitting there. Stash's storage is the same mechanism (`asgiref.local.Local`), but the lifetime is never left to memory — `StashMiddleware` opens and closes the scope on every single request, so there's no window where a stale value can survive into the next one.
+The last row is the trap: a hand-rolled `threading.local()` or `asgiref.Local()` looks identical to stash until a worker process reuses its thread for a second request and the old value is still sitting there. Stash's storage is the same mechanism (`asgiref.local.Local`), but the lifetime is never left to memory — `StashMiddleware` or `stash_scope()` opens and closes the scope around each unit of work, so there's no window where a stale value can survive into the next one.
 
 **[`django-request-cache`](https://github.com/anexia/django-request-cache)** takes the same idea a step further: instead of exposing one named value, it makes the *whole request object* reachable from anywhere first (via `django-userforeignkey`'s `get_current_request()`), then hangs a cache off it as an attribute. That's an extra dependency, and a much bigger object made globally available than most call sites need. Stash's storage never holds `request` — only the specific values you chose to stash, by name.
 
@@ -161,7 +180,7 @@ stash.get("k")                  # -> None
 
 That is deliberate: a long-lived worker never accumulates stale values by accident.
 
-If you want the same per-unit-of-work behaviour there, open a scope yourself:
+If you want the same per-unit-of-work behaviour there, open a scope yourself — the same `stash_scope()` you'd use in your own middleware:
 
 ```python
 with stash.stash_scope():

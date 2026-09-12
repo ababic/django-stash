@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- README: install section now shows opening a scope from your own middleware with `stash_scope()` as an alternative to `StashMiddleware`.
+
 ## 0.2.1
 
 - README: alternatives comparison table (`django-request-cache`, Django's cache framework, `functools.lru_cache`, bare thread-locals) and a genuinely request-derived hero example (hostname-based tenant resolution) in place of one that never touched `request`.
