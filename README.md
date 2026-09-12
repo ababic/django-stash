@@ -74,7 +74,9 @@ class Command(stash.StashCommandMixin, BaseCommand):
         self.stdout.write(str(tenant))
 ```
 
-These openers compose. A package `stash_scope()` around `get_response` is safe even if the project also uses `StashMiddleware` — keep `StashMiddleware` first so it opens the request, then later middleware stacks on it. Use a [named scope](#named-scopes) when two packages would otherwise share a key like `"tenant"`.
+These openers compose. A package `stash_scope()` around `get_response` is safe even if the project also uses `StashMiddleware` — keep `StashMiddleware` first so it opens the request, then later middleware stacks on it.
+
+Keys in the default scope are shared with the project. If a value is yours alone, give it a [named scope](#named-scopes) so nothing else can read, overwrite, or `clear` it.
 
 ## The problem it solves
 
@@ -202,32 +204,28 @@ Writes in the inner `with` stay there. Reads look in the inner block first, then
 
 ### Named scopes
 
-A name is a separate namespace that can be open at the same time as the default — so a package can stash `"tenant"` without colliding with the app's `"tenant"`.
+A name is a separate namespace. `stash.get("page")` never sees `stash.get("page", scope="wagtail")`, and `clear("page")` in one does not touch the other.
 
-If your package is the only opener, the [Install](#install) example is enough: no name, no `scope=`. Use a named scope when the project already has a default scope (or another package might) and you want your keys kept apart:
+**In a reusable package, use a unique name for values that are yours.** You cannot know whether the project — or another package — already uses `"page"` or `"tenant"`. Pick the package name, open that scope from middleware you control, and pass `scope=` at every call site, including `@stash.memoize(scope="wagtail")`:
 
 ```python
 import stash
 
-class TenantMiddleware:
+class PageMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
 
     def __call__(self, request):
-        with stash.stash_scope("tenants"):
-            stash.set(
-                "tenant",
-                Tenant.objects.get(domain=request.get_host()),
-                scope="tenants",
-            )
+        with stash.stash_scope("wagtail"):
+            stash.set("page", resolve_page(request), scope="wagtail")
             return self.get_response(request)
 
 
-def get_current_tenant():
-    return stash.get("tenant", scope="tenants")
+def get_current_page():
+    return stash.get("page", scope="wagtail")
 ```
 
-`stash.get("tenant")` still reads the default scope. Pass `scope=` at every call site that belongs to the named one, including `@stash.memoize(scope="tenants")`. Pick a stable name — the package name is fine.
+**Leave the name off when the rest of the project is supposed to read the value** — the current tenant, the current site. That is the [Install](#install) example: `stash.set("tenant", ...)` with no `scope=`, so `stash.get("tenant")` works from models, template tags, and signals. Document those keys.
 
 ### Outside a request
 

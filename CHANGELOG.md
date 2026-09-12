@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Named scopes (`stash_scope("tenants")` + `scope=` on get/set/get_or_set/clear/memoize) can be open alongside the default scope. Nested `stash_scope()` calls with the same name stack instead of replacing.
+- Named scopes (`stash_scope("wagtail")` + `scope=` on get/set/get_or_set/clear/memoize) can be open alongside the default scope. Nested `stash_scope()` calls with the same name stack instead of replacing. Packages use a unique name for private values; the default scope when the host should read them.
 
 ## 0.3.0
 

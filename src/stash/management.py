@@ -21,8 +21,8 @@ class StashCommandMixin:
 
     Nested ``stash_scope()`` calls stack on this scope, so a per-item
     ``with stash.stash_scope():`` keeps command-level values and drops
-    item-level ones when the block ends. A named ``stash_scope("item")``
-    can run alongside the command scope instead.
+    item-level ones when the block ends. In a reusable package, use a
+    unique name for values the host should not see.
     """
 
     def execute(self, *args: Any, **options: Any) -> Any:
