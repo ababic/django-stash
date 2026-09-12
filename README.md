@@ -118,6 +118,7 @@ Reach for stash when a value is expensive, needed in more than one place during 
 
 ## Where this doesn't fit
 
+- **Secrets, tokens, passwords, or anything you would not put in Django's cache.** Stash is ambient: any code in the same scope can `stash.get` the value by name. A named scope only keeps your keys apart from other packages; it does not hide anything. Leave credentials out.
 - **You want the answer shared across requests, workers, or deploys.** That's Django's cache framework (`django.core.cache`, backed by Redis/Memcached/the DB). Stash never outlives one scope — put it in front of that cache as L1 if you want both.
 - **The value needs to reach other processes.** Stash is per-process, per-scope. One worker's stash tells another worker nothing.
 - **A pure function with no invalidation need, no request in the picture.** `functools.lru_cache` is simpler and doesn't need a scope at all.
@@ -268,6 +269,7 @@ with stash.stash_scope():
 
 ## Notes
 
+- **Do not stash secrets.** Same rule as Django's cache: no passwords, API keys, session tokens, or raw credentials. See [Where this doesn't fit](#where-this-doesnt-fit).
 - Values are stored and returned as **shallow copies**. Mutating what you get back does not change what is stored. Don't rely on identity.
 - Stash is an L1 in front of whatever you already do. If you also want cross-process sharing, keep using Django's cache as L2 inside your loader.
 - Works under WSGI and ASGI, with sync or async views. The middleware is sync- and async-capable, so it does not force Django to adapt the rest of the chain. Storage is `asgiref.local.Local`.
