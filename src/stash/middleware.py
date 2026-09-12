@@ -15,9 +15,11 @@ class StashMiddleware:
     Works as sync or async middleware, so it does not force Django to adapt the
     middleware chain when running under ASGI.
 
-    If you already have middleware that should own the lifetime, wrap
-    ``get_response`` in ``stash.stash_scope()`` instead of installing this
-    class. Don't combine the two — a new scope replaces the previous one.
+    For a website or web app you own, this is the easy way to get started. In
+    a reusable package, prefer wrapping ``get_response`` in
+    ``stash.stash_scope()`` from middleware you already require (or one of
+    your own), so installers don't have to add this class. Don't combine the
+    two — a new scope replaces the previous one.
 
     Outside a scope (management commands, Celery tasks, etc.) stash reads miss
     and writes no-op, so values cannot leak across units of work on a reused
