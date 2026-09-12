@@ -1,5 +1,6 @@
 # django-stash
 
+[![PyPI](https://img.shields.io/pypi/v/django-stash.svg)](https://pypi.org/project/django-stash/)
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
