@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 - README: HTTP scopes belong in middleware, not a view mixin or decorator — Django renders `TemplateResponse` after the view returns.
 
