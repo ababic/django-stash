@@ -25,7 +25,8 @@ def enable() -> None:
     """
     Open a stash scope for this execution context.
 
-    Prefer ``StashMiddleware`` or ``stash_scope()`` so lifetime is bounded.
+    Prefer ``StashMiddleware``, ``StashCommandMixin``, or ``stash_scope()``
+    so lifetime is bounded.
     """
     _local.enabled = True
     _local.values = {}
@@ -154,9 +155,9 @@ def stash_scope() -> Iterator[None]:
 
     Use this in your own middleware instead of ``StashMiddleware`` — the
     better option in a reusable package, so installers don't have to add
-    third-party middleware — or around a unit of work in a management
-    command, Celery task, or test. Nested calls replace the previous scope
-    rather than stacking.
+    third-party middleware — or around a unit of work in a Celery task,
+    test, or loop. For a management command, prefer ``StashCommandMixin``.
+    Nested calls replace the previous scope rather than stacking.
     """
     enable()
     try:

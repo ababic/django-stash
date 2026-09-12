@@ -10,10 +10,12 @@ from stash.api import (
     set,
     stash_scope,
 )
+from stash.management import StashCommandMixin
 from stash.middleware import StashMiddleware
 
 
 __all__ = [
+    "StashCommandMixin",
     "StashMiddleware",
     "__version__",
     "clear",

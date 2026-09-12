@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from io import StringIO
+
 from asgiref.sync import iscoroutinefunction
+from django.core.management import call_command
+from django.core.management.base import BaseCommand
 from django.http import HttpResponse
 from django.test import SimpleTestCase, override_settings
 
@@ -142,3 +146,58 @@ class StashMiddlewareTests(SimpleTestCase):
 
         self.assertFalse(iscoroutinefunction(StashMiddleware(sync_get_response)))
         self.assertTrue(iscoroutinefunction(StashMiddleware(async_get_response)))
+
+
+class StashCommandMixinTests(SimpleTestCase):
+    def setUp(self) -> None:
+        stash.disable()
+
+    def tearDown(self) -> None:
+        stash.disable()
+
+    def test_mixin_memoizes_within_one_run(self) -> None:
+        class ProbeCommand(stash.StashCommandMixin, BaseCommand):
+            def handle(self, *args, **options):
+                calls = {"n": 0}
+
+                def loader():
+                    calls["n"] += 1
+                    return "v"
+
+                stash.get_or_set("k", loader)
+                stash.get_or_set("k", loader)
+                self.stdout.write(str(calls["n"]))
+
+        out = StringIO()
+        call_command(ProbeCommand(), stdout=out)
+        self.assertEqual(out.getvalue().strip(), "1")
+        self.assertFalse(stash.enabled())
+        self.assertIsNone(stash.get("k"))
+
+    def test_without_mixin_loader_runs_twice(self) -> None:
+        class BareCommand(BaseCommand):
+            def handle(self, *args, **options):
+                calls = {"n": 0}
+
+                def loader():
+                    calls["n"] += 1
+                    return "v"
+
+                stash.get_or_set("k", loader)
+                stash.get_or_set("k", loader)
+                self.stdout.write(str(calls["n"]))
+
+        out = StringIO()
+        call_command(BareCommand(), stdout=out)
+        self.assertEqual(out.getvalue().strip(), "2")
+
+    def test_scope_closes_when_handle_raises(self) -> None:
+        class BoomCommand(stash.StashCommandMixin, BaseCommand):
+            def handle(self, *args, **options):
+                stash.set("k", 1)
+                raise RuntimeError("nope")
+
+        with self.assertRaises(RuntimeError):
+            call_command(BoomCommand(), stdout=StringIO())
+        self.assertFalse(stash.enabled())
+        self.assertIsNone(stash.get("k"))
