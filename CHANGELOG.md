@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- README: PyPI badge linking to https://pypi.org/project/django-stash/
+
 ## 0.4.1
 
 - README: HTTP scopes belong in middleware, not a view mixin or decorator — Django renders `TemplateResponse` after the view returns.
