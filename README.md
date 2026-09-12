@@ -59,7 +59,22 @@ class TenantMiddleware:
             return self.get_response(request)
 ```
 
-The same `with` works in async middleware. Don't also install `StashMiddleware`: `stash_scope()` starts a fresh scope, it does not nest.
+The same `with` works in async middleware.
+
+Management commands sit outside the request cycle, so `StashMiddleware` never runs. Mix `StashCommandMixin` onto the command so each invocation gets a stash scope — in an app you own, or in a package (installers never see it):
+
+```python
+from django.core.management.base import BaseCommand
+
+import stash
+
+class Command(stash.StashCommandMixin, BaseCommand):
+    def handle(self, *args, **options):
+        tenant = stash.get_or_set("tenant", load_tenant)
+        self.stdout.write(str(tenant))
+```
+
+Don't combine these openers around the same work: `stash_scope()` starts a fresh scope, it does not nest. For a fresh memo per item, skip the mixin and wrap each item in `stash_scope()` instead.
 
 ## The problem it solves
 
@@ -95,7 +110,7 @@ Reach for stash when a value is expensive, needed in more than one place during 
 - **A check that fans out across a page.** A changelist renders 50 rows and calls `can_edit(obj)` for each. If `can_edit` starts with something request-wide — "is this user a reviewer this month" — that shouldn't be recomputed 50 times.
 - **You're about to write `request._cached_thing = ...`.** This pattern already exists in most Django codebases: stash something on `request` in middleware, read it back everywhere else. It works, but it only works where `request` is reachable, and it leaks the caching detail into every call site. `stash.get_or_set` is the same idea, usable from anywhere, without a `request` reference.
 - **A value that must be refreshed mid-request after a write.** Read settings early; a view updates them; later code in the *same* request must see the new value. One `stash.clear("site_settings")` call after the write handles it — see [`clear`](#get-set-clear) below.
-- **Batch scripts, one memo per unit of work.** Wrap each row/item in `stash_scope()` so lookups inside it are cheap, and nothing survives to the next item.
+- **Batch scripts, one memo per unit of work.** Mix `StashCommandMixin` onto a management command to scope the whole run, or wrap each row/item in `stash_scope()` so nothing survives to the next item. Don't combine the two — nested scopes replace rather than stack.
 
 ## Where this doesn't fit
 
@@ -107,14 +122,14 @@ Reach for stash when a value is expensive, needed in more than one place during 
 
 | | Scope | Needs `request`? | Cost per hit | Crosses requests / processes? | Invalidation |
 |---|---|---|---|---|---|
-| **stash** | One request, or a `stash_scope()` block | No | Dict lookup | Never | Automatic when the scope ends; `clear()` any time before that |
+| **stash** | One request, a management command run, or a `stash_scope()` block | No | Dict lookup | Never | Automatic when the scope ends; `clear()` any time before that |
 | **[`django-request-cache`](https://github.com/anexia/django-request-cache)** | One request | Yes — exposes the *whole* request globally to get one | Attribute lookup | No | Automatic at request end only |
 | **`request._cached_x`** (manual) | One request | Yes, at every call site | Attribute lookup | No | Manual, ad hoc |
 | **Django's cache framework** | Until TTL, eviction, or delete | No | locmem: lock + dict. Redis/Memcached/DB: network round trip + (de)serialization, every call | Yes — that's the point | TTL, `cache.delete()`, or signals |
 | **`functools.lru_cache`** | Process lifetime | No | Dict lookup | Accidentally, forever — same answer until the process restarts | None, short of calling `cache_clear()` yourself |
 | **Bare thread-local / module global** | However long you remember to keep it valid | No | Dict/attribute lookup | Accidentally — sync workers reuse a thread across requests | Whatever you remember to write, wherever you remember to write it |
 
-The last row is the trap: a hand-rolled `threading.local()` or `asgiref.Local()` looks identical to stash until a worker process reuses its thread for a second request and the old value is still sitting there. Stash's storage is the same mechanism (`asgiref.local.Local`), but the lifetime is never left to memory — `StashMiddleware` or `stash_scope()` opens and closes the scope around each unit of work, so there's no window where a stale value can survive into the next one.
+The last row is the trap: a hand-rolled `threading.local()` or `asgiref.Local()` looks identical to stash until a worker process reuses its thread for a second request and the old value is still sitting there. Stash's storage is the same mechanism (`asgiref.local.Local`), but the lifetime is never left to memory — `StashMiddleware`, `StashCommandMixin`, or `stash_scope()` opens and closes the scope around each unit of work, so there's no window where a stale value can survive into the next one.
 
 **[`django-request-cache`](https://github.com/anexia/django-request-cache)** takes the same idea a step further: instead of exposing one named value, it makes the *whole request object* reachable from anywhere first (via `django-userforeignkey`'s `get_current_request()`), then hangs a cache off it as an attribute. That's an extra dependency, and a much bigger object made globally available than most call sites need. Stash's storage never holds `request` — only the specific values you chose to stash, by name.
 
@@ -180,11 +195,13 @@ stash.get("k")                  # -> None
 
 That is deliberate: a long-lived worker never accumulates stale values by accident.
 
-If you want the same per-unit-of-work behaviour there, open a scope yourself — the same `stash_scope()` you'd use in your own middleware:
+For a management command, mix in `StashCommandMixin` so each run gets a scope — the same idea as `StashMiddleware` for HTTP. See [Install](#install).
+
+If you want a fresh memo per item (or the same behaviour in a Celery task or shell), open a scope yourself:
 
 ```python
 with stash.stash_scope():
-    process_batch()   # values remembered for this block only
+    process_item()   # values remembered for this block only
 ```
 
 ## Behaviour in one table
@@ -196,7 +213,7 @@ with stash.stash_scope():
 | After `stash.clear("k")` | runs `loader()` again |
 | Different request | runs `loader()` again |
 | Different thread / process | runs `loader()` again |
-| No middleware / no scope | runs `loader()` every time; stores nothing |
+| No scope | runs `loader()` every time; stores nothing |
 
 ## Notes
 

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - README: install section splits app vs package setup — `StashMiddleware` for an app you own, `stash_scope()` in middleware you control so package installers don't have to add a third-party class.
+- Add `StashCommandMixin` to open a stash scope around each management command run.
 
 ## 0.2.1
 
