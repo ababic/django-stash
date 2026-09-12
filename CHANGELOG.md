@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- README: install section now shows opening a scope from your own middleware with `stash_scope()` as an alternative to `StashMiddleware`.
+- README: install section splits app vs package setup — `StashMiddleware` for an app you own, `stash_scope()` in middleware you control so package installers don't have to add a third-party class.
 
 ## 0.2.1
 

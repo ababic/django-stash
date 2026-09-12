@@ -33,7 +33,9 @@ This is **not** a cache backend. Nothing is shared between requests, processes, 
 pip install django-stash
 ```
 
-Nothing is stored unless a scope is open. The usual way is `StashMiddleware`:
+Nothing is stored unless a scope is open. No `INSTALLED_APPS` entry needed.
+
+If you want to use django-stash in an app you own — a website or web app — `StashMiddleware` makes it easy to get started:
 
 ```python
 MIDDLEWARE = [
@@ -42,7 +44,7 @@ MIDDLEWARE = [
 ]
 ```
 
-If you already have middleware that should own the lifetime — tenant resolution, site matching, and so on — wrap the rest of the request in `stash_scope()` instead. You don't need `StashMiddleware` as well:
+If you want to use it in a package (an add-on, a performance monitoring tool, or a CMS framework), open the scope from middleware you already require, or add one of your own. That way installers don't have to add an unfamiliar third-party middleware to their project settings:
 
 ```python
 import stash
@@ -57,9 +59,7 @@ class TenantMiddleware:
             return self.get_response(request)
 ```
 
-The same `with` works in async middleware. Use one opener, not both: `stash_scope()` starts a fresh scope, it does not nest.
-
-No `INSTALLED_APPS` entry needed.
+The same `with` works in async middleware. Don't also install `StashMiddleware`: `stash_scope()` starts a fresh scope, it does not nest.
 
 ## The problem it solves
 

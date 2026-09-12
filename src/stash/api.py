@@ -152,9 +152,11 @@ def stash_scope() -> Iterator[None]:
     """
     Open a stash scope for a block of work.
 
-    Use this in your own middleware instead of ``StashMiddleware``, or around
-    a unit of work in a management command, Celery task, or test. Nested
-    calls replace the previous scope rather than stacking.
+    Use this in your own middleware instead of ``StashMiddleware`` — the
+    better option in a reusable package, so installers don't have to add
+    third-party middleware — or around a unit of work in a management
+    command, Celery task, or test. Nested calls replace the previous scope
+    rather than stacking.
     """
     enable()
     try:
