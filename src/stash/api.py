@@ -191,7 +191,10 @@ def stash_scope(name: str | None = None) -> Iterator[None]:
 
     ``stash_scope("wagtail")`` is a separate named scope that can be open at
     the same time as the default. ``get`` / ``set`` / ``get_or_set`` /
-    ``clear`` take ``scope="wagtail"`` to read or write it.
+    ``clear`` take ``scope="wagtail"`` to read or write it. In a reusable
+    package, pass a unique name (the package name) for values that should
+    not collide with the project; omit the name when the rest of the
+    project is meant to ``get`` them.
 
     Use this in your own middleware instead of ``StashMiddleware`` — the
     better option in a reusable package, so installers don't have to add
