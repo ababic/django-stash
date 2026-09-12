@@ -72,6 +72,9 @@ jobs:
   github-release:
     name: GitHub release
     needs: build
+    # Tag pushes only — never on pull_request, even if this workflow later
+    # gains that trigger.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Download distributions
@@ -89,6 +92,7 @@ jobs:
   publish-pypi:
     name: Publish to PyPI
     needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment:
       name: pypi
