@@ -262,6 +262,8 @@ with stash.stash_scope():
     process_item()
 ```
 
+A test is not a special case: no scope, no stored value. See [Testing](#testing).
+
 ## Behaviour in one table
 
 | Situation | `get_or_set("k", loader)` |
@@ -279,6 +281,129 @@ with stash.stash_scope():
 - Values are stored and returned as **shallow copies**. Mutating what you get back does not change what is stored. Don't rely on identity.
 - Stash is an L1 in front of whatever you already do. If you also want cross-process sharing, keep using Django's cache as L2 inside your loader.
 - Works under WSGI and ASGI, with sync or async views. The middleware is sync- and async-capable, so it does not force Django to adapt the rest of the chain. Storage is `asgiref.local.Local`.
+
+## Testing
+
+Nothing is stored unless a scope is open, and a test does not get one for free. `stash.set` with no scope does nothing, `stash.get` returns the default, and `stash.get_or_set` calls the loader on every call — the same rule as [outside a request](#outside-a-request). If a helper opened a scope for every test, the suite would stay green after `StashMiddleware` disappeared from production. Nothing below turns itself on unless the test asks.
+
+Open the scope the same way production does for the code under test.
+
+### Through the real opener
+
+**HTTP.** Put `StashMiddleware` in the test `MIDDLEWARE` — the list you actually ship — and use the Django test client. The client runs middleware, so the scope covers the view *and* a deferred `TemplateResponse`. Using `RequestFactory`, or calling the view yourself, skips middleware, so it skips the scope too.
+
+`StashMiddleware` does not join a scope the test already opened. It calls `enable()` at the start of the request, which drops whatever was there, and `disable()` when the response is done. `stash.set("tenant", ...)` in the test, then `self.client.get(...)`, does not show that tenant to the view, and `stash.get` after the client returns is a miss. Put the tenant where the middleware actually finds it, and assert on the response:
+
+```python
+response = self.client.get("/", HTTP_HOST="acme.test")
+self.assertContains(response, "acme")
+self.assertFalse(stash.enabled())
+```
+
+A package that opens the scope with `with stash.stash_scope():` around `get_response` stacks, instead of replacing. An outer scope opened in the test is visible for that request; writes inside the `with` still die with it. If `StashMiddleware` is also installed and listed first, its `enable()` has already dropped that outer scope — same as production, where nothing is open before middleware.
+
+**Management commands.** Use `call_command`, not `Command().handle()`. `StashCommandMixin` opens the scope in `execute()`, and calling `handle()` directly skips it. The mixin stacks on a scope the test already opened, and drops only its own frame when `call_command` returns. You usually don't need that outer scope — the mixin owns the run.
+
+### Calling a function directly
+
+A template tag, a model method, `get_current_tenant()` from the top of this page — nothing is about to open a scope for you. Open one around the call. This does not prove the middleware is installed. The client test above is the one that proves that.
+
+```python
+def test_current_tenant(self):
+    tenant = Tenant(domain="acme.test")
+    with stash.stash_scope():
+        stash.set("tenant", tenant)
+        self.assertEqual(get_current_tenant(), tenant)
+```
+
+`@stash.stash_scope()` on the method is the same block, when the whole method needs it. `@stash.stash_scope("wagtail")` is the named scope. It stacks, and on the way out it restores whatever was open outside. It does not call `disable()`.
+
+You do not need a scope to check the value from something that only uses `get_or_set`. No scope means the loader runs every time; the answer is still the answer. Open a scope when the assertion is "loaded once", or when the code uses `set` / `get`. A "called once" assertion that fails because the loader ran twice is the test saying the scope is not open — the same thing production does if the middleware is missing.
+
+### A whole class, or pytest
+
+Repeating `with stash.stash_scope():` gets old, and it will not notice a previous test that called `enable()` and never `disable()`. `stash.testing` is that fence. Entering it drops any scope already open. Leaving it drops them again, including one this test opened and did not close.
+
+```python
+from django.test import TestCase
+
+import stash
+
+from stash.testing import StashTestMixin, activate
+
+
+class TenantTests(StashTestMixin, TestCase):
+    def setUp(self):
+        super().setUp()  # scope is open after this
+        stash.set("tenant", "acme")
+
+    def test_current_tenant(self):
+        self.assertEqual(get_current_tenant(), "acme")
+
+
+class OneOffTests(TestCase):
+    @activate()
+    def test_current_tenant(self):
+        stash.set("tenant", "acme")
+        self.assertEqual(get_current_tenant(), "acme")
+
+    @activate("wagtail")
+    def test_page(self):
+        stash.set("page", "home", scope="wagtail")
+        self.assertEqual(stash.get("page", scope="wagtail"), "home")
+```
+
+Mix `StashTestMixin` in ahead of `TestCase`, the same way `StashCommandMixin` goes ahead of `BaseCommand`. It always opens the default scope. `stash_scopes = ("wagtail",)` — or a single string — also opens that named scope, the same attribute as on the command mixin. Call `super().setUp()` before `stash.set`; the scope is not open until you do. It is still open in `tearDown`. Subtests share it. `stash.clear()`, or a nested `stash_scope()`, when one of them needs a fresh memo.
+
+`activate` is the same fence for one method, or for a `with` block that must not see anything from outside. Don't use it for a nested block whose outer values you still need afterwards: exit calls `disable()`, and the outer scope is not put back. That is what `stash_scope()` is for.
+
+Don't combine the mixin or `activate()` with the test client when `StashMiddleware` is installed. The middleware's `enable()` / `disable()` throws that scope away for the request and does not restore it.
+
+pytest, when django-stash is installed:
+
+```python
+import pytest
+
+import stash
+
+
+@pytest.mark.stash_scope
+def test_current_tenant():
+    stash.set("tenant", "acme")
+    assert stash.get("tenant") == "acme"
+
+
+@pytest.mark.stash_scope("wagtail")
+def test_page():
+    stash.set("page", "home", scope="wagtail")
+    assert stash.get("page", scope="wagtail") == "home"
+
+
+def test_current_tenant_via_fixture(stash_scope):
+    stash.set("tenant", "acme")
+    assert stash.get("tenant") == "acme"
+```
+
+The marker and the `stash_scope` fixture do what `activate()` does: a fresh default scope, plus any names passed to the marker, cleared when the test ends. The marker applies to a function, a class, or a module (`pytestmark = pytest.mark.stash_scope`). Requesting the fixture as well is fine; it still uses the marker's names. Neither turns itself on for a test that didn't ask. If plugin autoload is off, pass `-p stash.pytest_plugin`.
+
+### No scope, on purpose
+
+Some tests should prove the inactive path: a command without the mixin, a branch that runs in the shell. Leave the scope closed. `stash.disable()` in `setUp` and `tearDown`, so a leak from another test cannot look like this one passed:
+
+```python
+def setUp(self):
+    super().setUp()
+    stash.disable()
+
+
+def tearDown(self):
+    stash.disable()
+    super().tearDown()
+```
+
+The mixin and `activate` already do that around the tests that opt in. They do not do it for the rest of the suite.
+
+A scope opened in the test is visible to Django's `async def` test methods. It is not visible to a `threading.Thread` you start yourself — a request's scope stays on the request thread too.
 
 ## Development
 

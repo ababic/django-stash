@@ -35,10 +35,14 @@ dependencies = [
 [project.optional-dependencies]
 testing = [
     "coverage>=7.0,<8.0",
+    "pytest>=7",
 ]
 development = [
     "ruff>=0.1.1,<1.0",
 ]
+
+[project.entry-points.pytest11]
+django_stash = "stash.pytest_plugin"
 
 [project.urls]
 Source = "https://github.com/ababic/django-stash"

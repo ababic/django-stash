@@ -202,6 +202,9 @@ def stash_scope(name: str | None = None) -> Iterator[None]:
     test, or loop. Do not wrap a Django view: ``TemplateResponse`` is
     rendered after the view returns, so a mixin or decorator would close
     too early. For a management command, prefer ``StashCommandMixin``.
+    To fence a whole test so a previous test cannot leak in, use
+    ``stash.testing``. ``stash_scope()`` stacks and restores the outer
+    frame on exit, which is what you want for a block inside one test.
     """
     scopes = _scope_map()
     stack = scopes.setdefault(name, [])
