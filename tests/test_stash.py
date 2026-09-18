@@ -6,7 +6,7 @@ from asgiref.sync import iscoroutinefunction
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.http import HttpResponse
-from django.test import SimpleTestCase, override_settings
+from django.test import RequestFactory, SimpleTestCase, override_settings
 
 import stash
 
@@ -135,6 +135,24 @@ class StashMiddlewareTests(SimpleTestCase):
         response = await self.async_client.get("/probe/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content.decode(), "calls=1;same=True")
+        self.assertFalse(stash.enabled())
+
+    def test_middleware_drops_a_scope_opened_by_the_test(self) -> None:
+        seen: dict[str, object] = {}
+
+        def get_response(request):
+            seen["seed"] = stash.get("seed")
+            stash.set("during", 1)
+            return HttpResponse("ok")
+
+        stash.disable()
+        with stash.stash_scope():
+            stash.set("seed", "from-test")
+            StashMiddleware(get_response)(RequestFactory().get("/"))
+            self.assertIsNone(seen["seed"])
+            self.assertFalse(stash.enabled())
+            self.assertIsNone(stash.get("seed"))
+            self.assertIsNone(stash.get("during"))
         self.assertFalse(stash.enabled())
 
     def test_middleware_adapts_to_sync_and_async_chains(self) -> None:
