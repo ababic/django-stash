@@ -123,6 +123,11 @@ Reach for stash when a value is expensive, needed in more than one place during 
 
 ## Where this doesn't fit
 
+Skip stash when the value is easy to pass, cheap to compute, or belongs in a different tool:
+
+- **You can pass the value — or `request` — through a few functions you own.** `view → helper → do_the_thing` can take `tenant` as an argument. That's a clearer API: the dependency is in the signature, and the function is easy to test. Stash is for call sites that *don't* share a chain — a template tag, a signal handler, a model method — not for skipping an argument you'd rather not write.
+- **The value is only needed in one place.** Compute it there. Remembering it only pays off when unrelated code needs the same answer during one request.
+- **The lookup is cheap.** A dict access, a simple attribute, an already-loaded relation. Stash is for work you don't want to repeat — a query, a permission that fans out, a hostname lookup.
 - **Opening the HTTP scope from a view mixin or decorator.** Django renders `TemplateResponse` after the view returns, so template tags would miss. Use middleware — it is the only way to cover the full request/response cycle. See [Install](#install).
 - **Secrets, tokens, passwords, or anything you would not put in Django's cache.** Stash is ambient: any code in the same scope can `stash.get` the value by name. A named scope only keeps your keys apart from other packages; it does not hide anything. Leave credentials out.
 - **You want the answer shared across requests, workers, or deploys.** That's Django's cache framework (`django.core.cache`, backed by Redis/Memcached/the DB). Stash never outlives one scope — put it in front of that cache as L1 if you want both.
