@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- README: when not to use stash — prefer passing the value (or `request`) as an argument through a short call chain; skip it for one-off or cheap lookups.
 - README: PyPI badge linking to https://pypi.org/project/django-stash/
 - Testing: `stash.testing.StashTestMixin` and `activate()` open a fresh scope for a unittest/Django test and call `disable()` on the way in and out, so values cannot leak between tests. pytest: `stash_scope` fixture and `@pytest.mark.stash_scope` (optional named scopes).
 - README: how to test with scope activation — the test client and `call_command` when production opens the scope, `stash_scope()` around a direct call, and those helpers when many tests need a scope. `StashMiddleware` does not keep a scope the test already opened.
