@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - README: when not to use stash — prefer passing the value (or `request`) as an argument through a short call chain; skip it for one-off or cheap lookups.
 - README: PyPI badge linking to https://pypi.org/project/django-stash/
